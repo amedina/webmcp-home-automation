@@ -1,0 +1,380 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Smart Home Dashboard — WebMCP Tool Tests</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      background: #0f1117; color: #e4e6ed; padding: 2rem;
+    }
+    h1 { margin-bottom: .5rem; font-size: 1.4rem; }
+    #summary { margin-bottom: 1.5rem; font-size: .95rem; color: #8b8fa3; }
+    .pass { color: #00d68f; } .fail { color: #ff5c5c; }
+    .result {
+      background: #1a1d27; border: 1px solid #2a2e3a; border-radius: 10px;
+      padding: .75rem 1rem; margin-bottom: .5rem; font-size: .85rem;
+      display: flex; align-items: flex-start; gap: .5rem;
+    }
+    .result .icon { flex-shrink: 0; font-size: 1rem; }
+    .result .detail { color: #8b8fa3; margin-top: .2rem; font-size: .8rem; }
+  </style>
+</head>
+<body>
+  <h1>WebMCP Tool Test Suite</h1>
+  <div id="summary">Running tests...</div>
+  <div id="results"></div>
+
+  <!-- Load the main app so we have app + tools available -->
+  <link rel="stylesheet" href="style.css">
+  <script>
+    /* ──────────────────────────────────────────────────────
+       Shim navigator.modelContext for testing.
+       We capture every tool registered via registerTool
+       so tests can call execute() directly.
+    ────────────────────────────────────────────────────── */
+    const registeredTools = {};
+
+    if (!("modelContext" in navigator)) {
+      Object.defineProperty(navigator, "modelContext", {
+        value: {
+          registerTool(def) { registeredTools[def.name] = def; },
+          unregisterTool(name) { delete registeredTools[name]; },
+        },
+        writable: false,
+        configurable: true,
+      });
+    }
+  </script>
+  <script src="script.js"></script>
+  <script>
+    /* ──────────────────────────────────────────────────────
+       Minimal test runner
+    ────────────────────────────────────────────────────── */
+    const results = [];
+
+    function assert(condition, message) {
+      if (!condition) throw new Error(message);
+    }
+
+    function assertDeepEqual(actual, expected, path = "") {
+      if (typeof expected !== "object" || expected === null) {
+        assert(
+          actual === expected,
+          `${path}: expected ${JSON.stringify(expected)}, got ${JSON.stringify(actual)}`
+        );
+        return;
+      }
+      for (const key of Object.keys(expected)) {
+        assertDeepEqual(actual[key], expected[key], `${path}.${key}`);
+      }
+    }
+
+    async function test(name, fn) {
+      try {
+        await fn();
+        results.push({ name, passed: true });
+      } catch (e) {
+        results.push({ name, passed: false, error: e.message });
+      }
+    }
+
+    function resetState() {
+      app.state.lights.living_room = { on: false, color: "#ffd54f" };
+      app.state.lights.bedroom     = { on: false, color: "#ffd54f" };
+      app.state.thermostat.temperature = 72;
+      app.state.locks.front_door.locked = false;
+      app.render();
+    }
+
+    function callTool(name, params = {}) {
+      const tool = registeredTools[name];
+      if (!tool) throw new Error(`Tool "${name}" not registered.`);
+      const raw = tool.execute(params);
+      return JSON.parse(raw);
+    }
+
+    /* ──────────────────────────────────────────────────────
+       Tests
+    ────────────────────────────────────────────────────── */
+    async function runTests() {
+
+      // ─── Tool registration ───────────────────────────
+      await test("All 6 tools are registered", () => {
+        const expected = [
+          "get_home_status", "toggle_light", "set_temperature",
+          "set_light_color", "toggle_lock", "trigger_scene",
+        ];
+        for (const name of expected) {
+          assert(registeredTools[name], `Tool "${name}" not registered.`);
+        }
+      });
+
+      await test("Every tool has a description and inputSchema", () => {
+        for (const [name, tool] of Object.entries(registeredTools)) {
+          assert(typeof tool.description === "string" && tool.description.length > 0,
+            `${name}: missing description.`);
+          assert(tool.inputSchema && typeof tool.inputSchema === "object",
+            `${name}: missing inputSchema.`);
+        }
+      });
+
+      await test("Annotations are booleans, not strings", () => {
+        for (const [name, tool] of Object.entries(registeredTools)) {
+          if (!tool.annotations) continue;
+          for (const [key, val] of Object.entries(tool.annotations)) {
+            assert(typeof val === "boolean",
+              `${name}.annotations.${key} is "${typeof val}", expected boolean.`);
+          }
+        }
+      });
+
+      // ─── get_home_status ─────────────────────────────
+      await test("get_home_status returns full state", () => {
+        resetState();
+        const res = callTool("get_home_status");
+        assert(res.success === true, "Expected success: true.");
+        assert(res.new_state.lights.living_room !== undefined, "Missing living_room.");
+        assert(res.new_state.lights.bedroom !== undefined, "Missing bedroom.");
+        assert(typeof res.new_state.thermostat.temperature === "number", "Missing temperature.");
+        assert(typeof res.new_state.locks.front_door.locked === "boolean", "Missing lock.");
+      });
+
+      // ─── toggle_light ────────────────────────────────
+      await test("toggle_light turns a light on", () => {
+        resetState();
+        const res = callTool("toggle_light", { light_id: "living_room" });
+        assert(res.success === true, "Expected success.");
+        assert(res.new_state.on === true, "Light should be on.");
+        assert(app.state.lights.living_room.on === true, "Internal state mismatch.");
+      });
+
+      await test("toggle_light turns a light back off", () => {
+        resetState();
+        callTool("toggle_light", { light_id: "bedroom" });
+        const res = callTool("toggle_light", { light_id: "bedroom" });
+        assert(res.success === true, "Expected success.");
+        assert(res.new_state.on === false, "Light should be off.");
+      });
+
+      await test("toggle_light rejects invalid light_id", () => {
+        resetState();
+        const res = callTool("toggle_light", { light_id: "garage" });
+        assert(res.success === false, "Expected failure.");
+        assert(res.error.includes("garage"), "Error should mention invalid id.");
+      });
+
+      await test("toggle_light updates DOM", () => {
+        resetState();
+        callTool("toggle_light", { light_id: "living_room" });
+        const status = document.getElementById("status-living-room");
+        assert(status.textContent === "On", `DOM shows "${status.textContent}", expected "On".`);
+      });
+
+      // ─── set_temperature ─────────────────────────────
+      await test("set_temperature sets valid temperature", () => {
+        resetState();
+        const res = callTool("set_temperature", { degrees: 68 });
+        assert(res.success === true, "Expected success.");
+        assert(res.new_state.temperature === 68, `Expected 68, got ${res.new_state.temperature}.`);
+      });
+
+      await test("set_temperature clamps values below minimum", () => {
+        resetState();
+        const res = callTool("set_temperature", { degrees: 30 });
+        assert(res.success === true, "Expected success.");
+        assert(res.new_state.temperature === 50, `Expected 50 (min), got ${res.new_state.temperature}.`);
+      });
+
+      await test("set_temperature clamps values above maximum", () => {
+        resetState();
+        const res = callTool("set_temperature", { degrees: 120 });
+        assert(res.success === true, "Expected success.");
+        assert(res.new_state.temperature === 90, `Expected 90 (max), got ${res.new_state.temperature}.`);
+      });
+
+      await test("set_temperature updates DOM", () => {
+        resetState();
+        callTool("set_temperature", { degrees: 77 });
+        const el = document.getElementById("status-thermostat");
+        assert(el.textContent.includes("77"), `DOM should show 77, got "${el.textContent}".`);
+      });
+
+      await test("set_temperature rejects non-number", () => {
+        resetState();
+        const res = callTool("set_temperature", { degrees: "hot" });
+        assert(res.success === false, "Expected failure for non-number.");
+      });
+
+      // ─── set_light_color ─────────────────────────────
+      await test("set_light_color changes color", () => {
+        resetState();
+        const res = callTool("set_light_color", { light_id: "bedroom", color: "#ff0000" });
+        assert(res.success === true, "Expected success.");
+        assert(app.state.lights.bedroom.color === "#ff0000", "Color mismatch.");
+      });
+
+      await test("set_light_color rejects invalid light_id", () => {
+        const res = callTool("set_light_color", { light_id: "porch", color: "#fff" });
+        assert(res.success === false, "Expected failure.");
+      });
+
+      await test("set_light_color rejects empty color", () => {
+        const res = callTool("set_light_color", { light_id: "bedroom", color: "  " });
+        assert(res.success === false, "Expected failure for empty color.");
+      });
+
+      await test("set_light_color updates DOM color dot", () => {
+        resetState();
+        callTool("set_light_color", { light_id: "living_room", color: "blue" });
+        const dot = document.getElementById("color-dot-living-room");
+        assert(dot.style.background === "blue", `Dot bg is "${dot.style.background}", expected "blue".`);
+      });
+
+      // ─── toggle_lock ─────────────────────────────────
+      await test("toggle_lock locks the door", () => {
+        resetState();
+        const res = callTool("toggle_lock", { lock_id: "front_door" });
+        assert(res.success === true, "Expected success.");
+        assert(res.new_state.locked === true, "Door should be locked.");
+      });
+
+      await test("toggle_lock unlocks a locked door", () => {
+        resetState();
+        callTool("toggle_lock", { lock_id: "front_door" });
+        const res = callTool("toggle_lock", { lock_id: "front_door" });
+        assert(res.new_state.locked === false, "Door should be unlocked.");
+      });
+
+      await test("toggle_lock rejects invalid lock_id", () => {
+        const res = callTool("toggle_lock", { lock_id: "back_door" });
+        assert(res.success === false, "Expected failure.");
+      });
+
+      await test("toggle_lock updates DOM", () => {
+        resetState();
+        callTool("toggle_lock", { lock_id: "front_door" });
+        const el = document.getElementById("status-front-door");
+        assert(el.textContent === "Locked", `DOM shows "${el.textContent}", expected "Locked".`);
+      });
+
+      // ─── trigger_scene ───────────────────────────────
+      await test("trigger_scene 'night' turns off lights, locks door, lowers temp", () => {
+        resetState();
+        app.state.lights.living_room.on = true;
+        const res = callTool("trigger_scene", { scene: "night" });
+        assert(res.success === true, "Expected success.");
+        assert(app.state.lights.living_room.on === false, "Living room should be off.");
+        assert(app.state.lights.bedroom.on === false, "Bedroom should be off.");
+        assert(app.state.thermostat.temperature === 65, `Temp should be 65, got ${app.state.thermostat.temperature}.`);
+        assert(app.state.locks.front_door.locked === true, "Door should be locked.");
+      });
+
+      await test("trigger_scene 'morning' turns on lights, raises temp, unlocks door", () => {
+        resetState();
+        app.state.locks.front_door.locked = true;
+        const res = callTool("trigger_scene", { scene: "morning" });
+        assert(res.success === true, "Expected success.");
+        assert(app.state.lights.living_room.on === true, "Living room should be on.");
+        assert(app.state.lights.bedroom.on === true, "Bedroom should be on.");
+        assert(app.state.thermostat.temperature === 72, "Temp should be 72.");
+        assert(app.state.locks.front_door.locked === false, "Door should be unlocked.");
+      });
+
+      await test("trigger_scene 'away' turns off lights, lowers temp, locks door", () => {
+        resetState();
+        const res = callTool("trigger_scene", { scene: "away" });
+        assert(res.success === true, "Expected success.");
+        assert(app.state.lights.living_room.on === false, "Living room should be off.");
+        assert(app.state.thermostat.temperature === 60, "Temp should be 60.");
+        assert(app.state.locks.front_door.locked === true, "Door should be locked.");
+      });
+
+      await test("trigger_scene 'movie' sets living room purple, bedroom off", () => {
+        resetState();
+        const res = callTool("trigger_scene", { scene: "movie" });
+        assert(res.success === true, "Expected success.");
+        assert(app.state.lights.living_room.on === true, "Living room should be on.");
+        assert(app.state.lights.living_room.color === "#3a0ca3", "Living room should be purple.");
+        assert(app.state.lights.bedroom.on === false, "Bedroom should be off.");
+        assert(app.state.thermostat.temperature === 70, "Temp should be 70.");
+      });
+
+      await test("trigger_scene rejects invalid scene", () => {
+        const res = callTool("trigger_scene", { scene: "party" });
+        assert(res.success === false, "Expected failure.");
+      });
+
+      await test("trigger_scene returns full state snapshot", () => {
+        resetState();
+        const res = callTool("trigger_scene", { scene: "night" });
+        assert(res.new_state.lights !== undefined, "Should include lights.");
+        assert(res.new_state.thermostat !== undefined, "Should include thermostat.");
+        assert(res.new_state.locks !== undefined, "Should include locks.");
+      });
+
+      // ─── Cross-cutting ───────────────────────────────
+      await test("Activity log records entries", () => {
+        resetState();
+        const logBefore = document.getElementById("activity-log").children.length;
+        callTool("toggle_light", { light_id: "living_room" });
+        const logAfter = document.getElementById("activity-log").children.length;
+        assert(logAfter > logBefore, "Log should have a new entry.");
+      });
+
+      await test("Return values are valid JSON with success field", () => {
+        resetState();
+        for (const name of Object.keys(registeredTools)) {
+          const params = getDefaultParams(name);
+          const raw = registeredTools[name].execute(params);
+          const parsed = JSON.parse(raw);
+          assert(typeof parsed.success === "boolean",
+            `${name}: return value missing "success" boolean.`);
+        }
+      });
+
+      // ─── Display results ─────────────────────────────
+      renderResults();
+    }
+
+    function getDefaultParams(toolName) {
+      switch (toolName) {
+        case "get_home_status":  return {};
+        case "toggle_light":    return { light_id: "living_room" };
+        case "set_temperature": return { degrees: 72 };
+        case "set_light_color": return { light_id: "bedroom", color: "#00ff00" };
+        case "toggle_lock":     return { lock_id: "front_door" };
+        case "trigger_scene":   return { scene: "morning" };
+        default: return {};
+      }
+    }
+
+    function renderResults() {
+      const container = document.getElementById("results");
+      const passed = results.filter(r => r.passed).length;
+      const total  = results.length;
+
+      document.getElementById("summary").innerHTML =
+        `<span class="${passed === total ? "pass" : "fail"}">${passed}/${total} tests passed</span>`;
+
+      container.innerHTML = results.map(r => `
+        <div class="result">
+          <span class="icon">${r.passed ? "&#10003;" : "&#10007;"}</span>
+          <div>
+            <span class="${r.passed ? "pass" : "fail"}">${r.name}</span>
+            ${r.error ? `<div class="detail">${r.error}</div>` : ""}
+          </div>
+        </div>
+      `).join("");
+    }
+
+    /* ── Run on load ────────────────────────────────── */
+    window.addEventListener("load", () => {
+      /* Small delay to ensure tool registration has completed */
+      setTimeout(runTests, 100);
+    });
+  </script>
+</body>
+</html>

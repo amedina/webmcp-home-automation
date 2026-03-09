@@ -1,0 +1,107 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Smart Home Dashboard</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header>
+    <h1>Smart Home Dashboard</h1>
+    <span id="webmcp-badge" class="badge hidden">Agent Connected</span>
+  </header>
+
+  <main>
+    <!-- Device Cards — single responsive row -->
+    <section class="device-group">
+      <h2>Devices</h2>
+      <div class="cards">
+
+        <div class="card light-card" id="card-living-room" data-device="living_room">
+          <div class="card-icon" id="icon-living-room">
+            <svg viewBox="0 0 64 64" width="48" height="48">
+              <circle cx="32" cy="28" r="16" class="bulb-glow" id="glow-living-room"/>
+              <path d="M24 44 h16 v4 h-16z M26 48 h12 v3 h-12z" fill="#888"/>
+              <path d="M22 28 a10 10 0 1 1 20 0 a10 10 0 0 1-4 8 l-2 8 h-8 l-2-8 a10 10 0 0 1-4-8z" class="bulb-body" id="bulb-living-room"/>
+            </svg>
+          </div>
+          <h3>Living Room</h3>
+          <p class="status" id="status-living-room">Off</p>
+          <div class="color-dot-row">
+            <span class="color-label">Color:</span>
+            <span class="color-dot" id="color-dot-living-room"></span>
+          </div>
+          <button onclick="app.toggleLight('living_room')">Toggle</button>
+        </div>
+
+        <div class="card light-card" id="card-bedroom" data-device="bedroom">
+          <div class="card-icon" id="icon-bedroom">
+            <svg viewBox="0 0 64 64" width="48" height="48">
+              <circle cx="32" cy="28" r="16" class="bulb-glow" id="glow-bedroom"/>
+              <path d="M24 44 h16 v4 h-16z M26 48 h12 v3 h-12z" fill="#888"/>
+              <path d="M22 28 a10 10 0 1 1 20 0 a10 10 0 0 1-4 8 l-2 8 h-8 l-2-8 a10 10 0 0 1-4-8z" class="bulb-body" id="bulb-bedroom"/>
+            </svg>
+          </div>
+          <h3>Bedroom</h3>
+          <p class="status" id="status-bedroom">Off</p>
+          <div class="color-dot-row">
+            <span class="color-label">Color:</span>
+            <span class="color-dot" id="color-dot-bedroom"></span>
+          </div>
+          <button onclick="app.toggleLight('bedroom')">Toggle</button>
+        </div>
+
+        <div class="card thermostat-card" id="card-thermostat">
+          <div class="card-icon">
+            <svg viewBox="0 0 64 80" width="48" height="60">
+              <rect x="24" y="4" width="16" height="52" rx="8" fill="#ddd" stroke="#999" stroke-width="2"/>
+              <rect x="28" y="20" width="8" rx="4" fill="#e74c3c" id="thermo-fill" height="32"/>
+              <circle cx="32" cy="60" r="10" fill="#e74c3c" id="thermo-bulb"/>
+            </svg>
+          </div>
+          <h3>Thermostat</h3>
+          <p class="status temp-display" id="status-thermostat">72 &deg;F</p>
+          <div class="temp-controls">
+            <button onclick="app.setTemperature(app.state.thermostat.temperature - 1)">-</button>
+            <button onclick="app.setTemperature(app.state.thermostat.temperature + 1)">+</button>
+          </div>
+        </div>
+
+        <div class="card lock-card" id="card-front-door">
+          <div class="card-icon">
+            <svg viewBox="0 0 64 64" width="48" height="48" id="lock-icon-front-door">
+              <rect x="16" y="28" width="32" height="28" rx="4" fill="#888" id="lock-body-front-door"/>
+              <path d="M22 28 V20 a10 10 0 0 1 20 0 V28" fill="none" stroke="#888" stroke-width="4" id="lock-shackle-front-door"/>
+              <circle cx="32" cy="42" r="4" fill="#333"/>
+            </svg>
+          </div>
+          <h3>Front Door</h3>
+          <p class="status" id="status-front-door">Unlocked</p>
+          <button onclick="app.toggleLock('front_door')">Toggle Lock</button>
+        </div>
+
+      </div>
+    </section>
+
+    <!-- Scenes Section -->
+    <section class="device-group">
+      <h2>Scenes</h2>
+      <div class="cards scenes">
+        <button class="scene-btn" onclick="app.triggerScene('morning')">Morning Mode</button>
+        <button class="scene-btn" onclick="app.triggerScene('night')">Night Mode</button>
+        <button class="scene-btn" onclick="app.triggerScene('away')">Away Mode</button>
+        <button class="scene-btn" onclick="app.triggerScene('movie')">Movie Mode</button>
+      </div>
+    </section>
+
+    <!-- Activity Log -->
+    <section class="device-group">
+      <h2>Activity Log</h2>
+      <ul id="activity-log"></ul>
+    </section>
+  </main>
+
+  <script src="script.js"></script>
+</body>
+</html>
